@@ -1,0 +1,517 @@
+# PRD dan Task Card Modul Kasir (`/kasir`)
+
+MVP Web App F&B Multi-Modul · Draft 10 Nov 2026 · Pemutus: manusia
+
+**Status:** draft kerja, versi demo. G0 belum lolos, kontrak data belum beku. Semua yang bergantung pada wedge berlabel **[HIPOTESIS]**. Nama tabel, kolom, dan fungsi adalah usulan, bukan kontrak. Dokumen ini pasangan dari *PRD dan Task Card Modul Logistik (`/logistik`)*.
+
+## 0. Celah yang diketahui (tidak memblokir draf ini)
+
+| # | Celah | Perlakuan di dokumen ini |
+| --- | --- | --- |
+| 1 | T1, T2, T3 belum dijalankan; wedge belum teruji | Integrasi stok (K-10, K-11, K-14) ditandai menunggu G0. Fase 8 ke atas tetap terkunci |
+| 2 | Dokumen Tahap 0 asli belum terlampir | Aturan mengikuti master prompt dan `MVP.md` |
+| 3 | Skema Prisma/Zod belum beku (Fase 4) | Entitas di bawah = usulan; K-01 menghasilkan draf kontrak |
+| 4 | Konflik arsitektur Vercel vs Node.js di VPS (belum ada ADR-0002) | Logika kasir ditulis di lapisan service TypeScript yang agnostik lokasi |
+| 5 | ADR-0001 (tunai sebagai metode ketiga) belum diputuskan | Alur tunai ditulis sebagai opsi bersyarat, tidak masuk skenario demo utama |
+| 6 | Aturan stok saat order di-void belum ditetapkan (state machine Fase 2) | Skenario void di data dummy memakai perilaku usulan, ditandai jelas |
+| 7 | Mekanisme otorisasi void/refund (PIN, login ulang, atau role) belum diputuskan | Pertanyaan terbuka #3 |
+| 8 | Apakah dapur terpisah dari kasir di outlet pilot | Asumsi: tidak terpisah; tiket dapur tampil di `/kasir` saat flag dapur mati [HIPOTESIS] |
+
+## 1. Ringkasan produk
+
+**Tujuan:** kasir (sering pemilik yang merangkap kasir) dapat menerima pesanan dari pelanggan atau membuatnya sendiri (walk-in), memastikan pembayaran dengan aman dari mutasi atau notifikasi merchant, melepas pesanan ke dapur, dan melihat ketersediaan menu yang sama dengan yang dilihat pelanggan dan staf logistik.
+
+**Inti integrasi dengan logistik [HIPOTESIS, menunggu G0]:** kasir tidak pernah menghitung stok sendiri. Setiap pembuatan, pembayaran, pembatalan, dan void order memanggil antarmuka `StockService` (Bagian 5). Hasilnya, angka tersedia/HABIS di layar kasir, halaman customer, dan `/logistik` selalu berasal dari satu fungsi `getAvailability`.
+
+**Bukan tujuan (non-goals):** split bill, gabung/pindah meja, struk WhatsApp, cetak thermal (V2); voucher, promo otomatis, poin (V3); kartu dan e-wallet di luar QRIS; surcharge QRIS ke customer (dilarang aturan bisnis); mode offline.
+
+**Pengguna:** kasir (utama), pemilik/admin (otorisasi void/refund, diskon), pelanggan (pembuat order lewat QR meja, hanya sebagai sumber order).
+
+## 2. Cakupan per milestone
+
+Nomor fitur mengikuti `MVP.md` Bagian 3 (kelompok A dan sebagian B/C).
+
+| ID | Fitur | Kelas | MS | Catatan |
+| --- | --- | --- | --- | --- |
+| A3 | Total dihitung server, satu fungsi | MVP | M1 | Sama di semua permukaan |
+| A4 | Gerbang dapur, satu fungsi service | MVP | M1 | Tiket di /kasir bila dapur nonaktif |
+| A5 | Bayar ManualQris, kasir verifikasi dari mutasi | MVP | M1 | Bukan dari screenshot |
+| A6 | SandboxGateway (QRIS dinamis simulasi) | MVP | M1 | Menguji idempotensi dan webhook |
+| A7 | Order walk-in oleh kasir | MVP | M1 | Fallback online-only |
+| A8 | Batal order sebelum bayar | MVP | M1 | Berbeda dari void/refund |
+| A9 | Pembayaran tunai dicatat kasir | Usulan | M1 | Menunggu ADR-0001 |
+| A10 | Halaman status dan bukti pesanan | MVP | M1/M2 | Realtime di M2 |
+| B4 | Ketersediaan tunggal + toggle HABIS manual | MVP | M2 | Kasir boleh toggle |
+| B5 | Tiket dapur realtime | MVP | M2 | Di balik flag |
+| A11 | pay_after: bill per sesi meja, kasir tutup bill | MVP | M3 | Paling akhir, bisa dipotong |
+| A12 | UI diskon manual | MVP | M3 | Butuh otorisasi dan audit log |
+| A13 | Void/refund dengan otorisasi | MVP | M3 | Area wajib review |
+| A14 | Pajak/biaya layanan | Kolom skema M0, UI V2 | M0/V2 | Naik ke MVP jika pilot menariknya |
+| C3 | Audit log: tulis sejak M1 | MVP | M1 | Verifikasi kasir sudah aksi sensitif |
+
+**Potongan versi demo (usulan):** M1 + M2 (pay_first, ManualQris, SandboxGateway, walk-in, batal, integrasi stok). Void ditampilkan sebagai skenario opsional dari M3. pay_after dan diskon tidak ada di demo.
+
+## 3. Persyaratan fungsional
+
+### 3.1 Daftar order dan bill (M1)
+
+- FR-1: Layar utama `/kasir` menampilkan bill aktif, diurutkan terbaru di atas, dengan status: `awaiting_payment`, `paid`, `void`, dan penanda order baru.
+- FR-2: Tiap baris menampilkan nomor order, sumber (meja atau walk-in), item, total, metode bayar, dan waktu.
+- FR-3: Pembaruan realtime; pulih otomatis saat koneksi kembali, dengan penanda "Menyambung ulang".
+
+### 3.2 Order walk-in (M1)
+
+- FR-4: Kasir memilih menu, varian, jumlah, dan catatan, lalu membuat order atas nama pelanggan tanpa meja (takeaway) atau dengan nomor meja.
+- FR-5: Menu berstatus HABIS tidak bisa dipilih (diabu-abukan dengan teks "Habis"); keputusan memakai `getAvailability`.
+- FR-6: Total dihitung server; kasir tidak bisa mengetik total.
+
+### 3.3 Verifikasi pembayaran (M1)
+
+- FR-7: ManualQris: pelanggan membayar ke QRIS statis outlet; kasir mencocokkan nominal dan waktu dengan mutasi atau notifikasi merchant, lalu menekan "Konfirmasi pembayaran". Sistem mencatat siapa, kapan, dan catatan opsional.
+- FR-8: UI mengingatkan "Cek mutasi atau notifikasi, bukan screenshot pelanggan" pada layar konfirmasi.
+- FR-9: SandboxGateway: pembayaran dikonfirmasi lewat webhook simulasi. Webhook diverifikasi dan idempotensinya dijamin; pengiriman ganda tidak membuat payment ganda.
+- FR-10: Payment dibuat per bill dengan idempotency key per percobaan.
+- FR-11: Konfirmasi dua kali pada bill yang sama tidak menghasilkan payment ganda dan tidak mengurangi stok dua kali.
+
+### 3.4 Gerbang dapur (M1)
+
+- FR-12: Order dilepas ke dapur hanya jika `payment_timing = pay_after` atau `bill.status = paid`. Hanya satu fungsi service yang memutuskan ini.
+- FR-13: Saat flag dapur nonaktif, tiket order yang dilepas tampil di `/kasir` [HIPOTESIS].
+
+### 3.5 Batal sebelum bayar (M1)
+
+- FR-14: Kasir atau pelanggan dapat membatalkan order berstatus `awaiting_payment`. Reservasi stok dilepas seketika.
+- FR-15: Order yang sudah dibayar tidak bisa dibatalkan lewat fitur ini; harus lewat void/refund (3.8).
+
+### 3.6 Integrasi stok dengan logistik (M2, menunggu G0)
+
+- FR-16: Saat order dibuat, service order memanggil `reserveForOrder` dalam transaksi yang sama. Jika salah satu item tidak tersedia, seluruh order ditolak dan tidak ada reservasi yang tertinggal (semua atau tidak sama sekali) [HIPOTESIS, pertanyaan terbuka #4].
+- FR-17: Saat bill menjadi `paid`, service memanggil `commitReservation` (idempoten) sehingga reservasi menjadi movement `sale`.
+- FR-18: Saat order dibatalkan, kedaluwarsa (TTL), atau pembayaran gagal, reservasi dilepas lewat `releaseReservation`.
+- FR-19: Kasir melihat ketersediaan tiap menu (tersedia/HABIS dan sisa angka) dari `getAvailability`, tanpa salinan aturan di UI.
+- FR-20: Kasir dapat menekan toggle HABIS manual per menu (mis. kuah habis walau stok tercatat masih ada). Toggle memakai fungsi yang sama dengan `/logistik`.
+- FR-21: Permintaan order langsung ke API untuk menu HABIS ditolak server dengan pesan "Menu habis".
+
+### 3.7 Tunai (bersyarat ADR-0001)
+
+- FR-22: Jika opsi 1 ADR-0001 dipilih: kasir memilih "Tunai", memasukkan nominal diterima, server menghitung kembalian, payment tercatat lewat CashProvider dengan idempotency key dan audit log. Jika opsi 2 atau 3 dipilih, bagian ini dihapus atau diganti.
+
+### 3.8 Void/refund dan diskon (M3)
+
+- FR-23: Void order berbayar butuh otorisasi pemilik/admin dan alasan wajib; tercatat di audit log (siapa, kapan, nilai sebelum/sesudah).
+- FR-24: Void memanggil `reverseSale`. Perilaku stok saat void **belum ditetapkan** (state machine Fase 2); usulan: movement `reversal` positif per menu, baris lama utuh.
+- FR-25: Diskon manual hanya oleh role berwenang, dihitung server, tercatat di audit log.
+
+## 4. Aturan bisnis
+
+1. Uang integer Rupiah; harga, diskon, dan total dihitung server.
+2. Tidak ada surcharge QRIS ke customer (MDR ditanggung merchant).
+3. Kasir memverifikasi dari notifikasi atau mutasi merchant, bukan screenshot.
+4. Gerbang dapur, kalkulasi total, dan mutasi stok masing-masing satu titik logika.
+5. Kasir dan UI tidak menulis `stock_movement` langsung; semua lewat `StockService`.
+6. `outlet_id` pada setiap baris; RLS aktif.
+7. Void/refund butuh otorisasi dan audit log.
+8. `payment_timing` di-snapshot saat bill dibuat.
+
+## 5. Kontrak integrasi kasir ↔ logistik (usulan, belum beku)
+
+Kasir hanya mengenal antarmuka berikut. Implementasi ada di `services/stock/*` (milik tugas L-03 sampai L-06).
+
+| Fungsi | Dipanggil saat | Hasil | Catatan |
+| --- | --- | --- | --- |
+| `getAvailability(menuItemId, businessDate)` | Menampilkan menu di kasir, customer, logistik; validasi saat order | `{status: AVAILABLE \| HABIS, tersedia: int, alasan: HABIS_STOK \| HABIS_MANUAL \| TIDAK_DILACAK}` | Satu-satunya sumber kebenaran |
+| `reserveForOrder(orderId, items[], ttlMenit)` | Order dibuat | `ok` atau `{ditolak: [menuItemId]}` | Atomik, semua atau tidak sama sekali. TTL default usulan 10 menit |
+| `commitReservation(orderId)` | Bill menjadi `paid` | movement `sale` tertulis, reservasi `committed` | Idempoten |
+| `releaseReservation(orderId, alasan)` | Batal, TTL habis, bayar gagal | reservasi `released` atau `expired` | |
+| `reverseSale(orderId, alasan, otorisasiOleh)` | Void order berbayar | movement `reversal` | Aturan menunggu Fase 2 |
+| `setManualSoldOut(menuItemId, bool, oleh)` | Toggle HABIS | override tersimpan + audit log | Sama dengan toggle di `/logistik` |
+
+**Invarian yang harus selalu benar:** `tersedia = stok awal + penyesuaian − terjual − reservasi aktif`; tidak pernah negatif; menu manual-habis selalu HABIS; angka di tiga permukaan identik.
+
+## 6. Usulan model data (draf kontrak, belum beku)
+
+- `bill`: id, outlet_id, table_id nullable, payment_timing (snapshot), status (`open`|`awaiting_payment`|`paid`|`void`), subtotal, discount (default 0), tax_service (default 0), total, created_at.
+- `order`: id, bill_id, outlet_id, source (`customer_qr`|`walk_in`), status, business_date, note, created_by nullable, created_at.
+- `order_item`: id, order_id, menu_item_id, variant nullable, qty, unit_price, line_total, note.
+- `payment`: id, bill_id, provider (`manual_qris`|`sandbox`|`cash` bersyarat), status, amount, idempotency_key unik, verified_by, verified_at, provider_ref nullable.
+- `audit_log`: id, outlet_id, actor_id, action, entity, before, after, created_at.
+- Tabel stok mengikuti PRD Logistik Bagian 5; kasir tidak membuat tabel stok.
+
+## 7. Hak akses (usulan)
+
+| Aksi | Pemilik/admin | Logistik | Kasir | Dapur | Customer |
+| --- | --- | --- | --- | --- | --- |
+| Lihat daftar bill | ya | tidak | ya | tidak | hanya order sendiri |
+| Buat order walk-in | ya | tidak | ya | tidak | tidak |
+| Konfirmasi pembayaran | ya | tidak | ya | tidak | tidak |
+| Batal sebelum bayar | ya | tidak | ya | tidak | order sendiri |
+| Toggle HABIS manual | ya | ya | ya | tidak | tidak |
+| Lihat tiket dapur | ya | tidak | ya | ya | tidak |
+| Void/refund, diskon | ya | tidak | tidak [HIPOTESIS] | tidak | tidak |
+| Baca audit log | ya | tidak | tidak | tidak | tidak |
+
+Akses lintas outlet ditolak oleh RLS.
+
+## 8. Persyaratan non-fungsional
+
+- Mobile-first, WCAG AA, Bahasa Indonesia, ringan untuk Android lama; target ketuk minimal 44 px.
+- Status realtime tetap terbaca saat koneksi putus dan tersambung lagi.
+- Latensi buat order dan konfirmasi bayar: target di bawah 2 detik [HIPOTESIS, diukur di M1/M2].
+- Log terstruktur dan audit log untuk aksi sensitif.
+- Online-only.
+
+## 9. Keadaan kosong, error, dan teks
+
+| Situasi | Teks Bahasa Indonesia |
+| --- | --- |
+| Belum ada order | "Belum ada pesanan. Pesanan baru akan muncul di sini." |
+| Menu habis saat dipesan | "Menu habis." |
+| Sebagian item habis | "Pesanan ditolak karena ada menu yang habis: [nama menu]." |
+| Reservasi kedaluwarsa | "Waktu bayar habis. Pesanan dibatalkan dan stok dikembalikan." |
+| Konfirmasi bayar | "Pastikan uang sudah masuk di mutasi atau notifikasi merchant, bukan dari screenshot." |
+| Koneksi putus | "Tidak ada koneksi. Perubahan belum tersimpan." |
+| Void tanpa otorisasi | "Butuh persetujuan pemilik untuk membatalkan pesanan yang sudah dibayar." |
+| Data berubah di perangkat lain | "Data baru saja diubah orang lain. Muat ulang." |
+
+## 10. Metrik keberhasilan (semua [HIPOTESIS])
+
+- Oversell di pilot: 0 (dibuktikan test konkurensi dan log).
+- Waktu dari order dibuat sampai tiket dapur terlepas setelah konfirmasi bayar: median di bawah 5 detik (diukur di demo).
+- Selisih angka tersedia antara kasir, customer, dan logistik: 0 pada seluruh skenario demo.
+- Pembayaran ganda akibat webhook ganda: 0.
+
+## 11. Risiko
+
+| Risiko | Dampak | Mitigasi |
+| --- | --- | --- |
+| Kasir salah konfirmasi bayar (pelanggan belum bayar) | Kerugian dan stok terjual tanpa uang | Pengingat cek mutasi, audit log, batas nominal harus cocok total bill [HIPOTESIS] |
+| Race condition reservasi | Oversell | Transaksi + kunci baris; test konkurensi; review manusia |
+| Webhook ganda | Payment atau stok ganda | Idempotency key, `commitReservation` idempoten |
+| TTL salah | Stok tertahan atau oversell | TTL dapat dikonfigurasi; test kedaluwarsa |
+| Aturan void belum jelas | Stok tidak konsisten | Tahan fitur sampai Fase 2 menetapkan |
+| Konflik arsitektur Vercel vs VPS | Task terpindah | ADR-0002; service agnostik |
+
+## 12. Pertanyaan terbuka untuk manusia
+
+1. ADR-0001: tunai sebagai metode ketiga atau tidak?
+2. Apakah pay_after wajib di MVP, atau cukup pay_first dulu?
+3. Mekanisme otorisasi void/refund: PIN pemilik, login ulang, atau persetujuan role?
+4. Order multi-item dengan sebagian item habis: tolak seluruh order (usulan) atau izinkan sebagian?
+5. TTL reservasi default (usulan 10 menit): perlu diuji dengan alur bayar nyata.
+6. Saat void, apakah stok kembali otomatis atau kasir memilih (kembali / terbuang)?
+7. Apakah outlet pilot memakai dapur terpisah?
+8. Apakah kasir boleh menandai HABIS manual tanpa konfirmasi pemilik?
+
+## 13. Task card
+
+Format mengikuti template tugas. Semua task: Definition of Done sesuai Bagian 6 master prompt; PR kecil; masalah di luar scope dicatat, tidak diperbaiki diam-diam. **Jika ada yang ambigu atau bertentangan dengan kontrak: BERHENTI dan tanyakan.**
+
+Urutan: `K-01 → K-02 → K-03 → K-04 → K-05 → K-06 → (K-07, K-08, K-09) → K-10 → K-11 → K-12 → K-13 → K-14`
+
+### K-01 Draf kontrak bill, order, payment (M0 / A)
+
+- **Kontrak:** belum beku; menghasilkan usulan.
+- **AC:**
+  - Given skema Bagian 6 When diulas Then ada Prisma model + Zod schema untuk `bill`, `order`, `order_item`, `payment`, `audit_log` dan enum status.
+  - Given payment dengan idempotency_key sama When ditulis dua kali Then tabel menolak duplikat.
+  - Given nominal non-integer When divalidasi Then Zod menolak.
+- **Batas file:** `prisma/schema` (bagian bill/order/payment), `packages/contracts/billing/*`; dilarang tabel stok.
+- **Review manusia:** ya (kontrak, migrasi).
+
+### K-02 RLS dan RBAC kasir (M0 / A)
+
+- **AC:**
+  - Given pengguna outlet A When query bill outlet B Then ditolak.
+  - Given role dapur When membaca payment Then ditolak.
+  - Given role kasir When void order berbayar Then ditolak.
+  - Given anon customer When membaca bill orang lain Then ditolak.
+- **Review manusia:** **ya, wajib**.
+
+### K-03 `BillService`: total dan status (M1 / A)
+
+- **AC:**
+  - Given item dengan harga dan qty When total dihitung Then sama di kasir, customer, dan bukti pesanan.
+  - Given total dikirim klien When berbeda dari server Then diabaikan dan server menghitung ulang.
+  - Given transisi tidak sah (paid → awaiting_payment) When dicoba Then ditolak.
+- **Test:** unit tanpa UI.
+
+### K-04 `PaymentProvider` + ManualQris (M1 / A)
+
+- **AC:**
+  - Given bill `awaiting_payment` When kasir konfirmasi Then payment `succeeded`, verified_by dan verified_at terisi, audit tercatat.
+  - Given konfirmasi kedua pada bill sama When dikirim Then satu payment.
+- **Review manusia:** ya (pembayaran).
+
+### K-05 SandboxGateway dan webhook idempoten (M1 / A)
+
+- **AC:**
+  - Given webhook valid When diterima Then bill `paid`.
+  - Given webhook yang sama dikirim dua kali When diproses Then satu payment dan satu commit stok.
+  - Given tanda tangan webhook salah When diterima Then ditolak.
+- **Review manusia:** **ya, wajib**. Provider sandbox ditentukan di Fase 5 [BELUM TERVERIFIKASI].
+
+### K-06 Gerbang dapur (M1 / A)
+
+- **AC:**
+  - Given pay_first dan bill belum paid When dicek Then order tidak dilepas.
+  - Given bill menjadi paid When dicek Then order dilepas tepat sekali.
+  - Given pay_after When order dibuat Then dilepas.
+- **Aturan:** satu fungsi service, tidak ada salinan aturan.
+
+### K-07 UI daftar bill dan konfirmasi bayar (M1 / A)
+
+- **AC:**
+  - Given bill baru When masuk Then tampil tanpa muat ulang dan ada penanda baru.
+  - Given layar konfirmasi When dibuka Then teks pengingat cek mutasi tampil.
+  - Given HP 360 px When dibuka Then tanpa scroll horizontal, target ketuk 44 px.
+
+### K-08 Order walk-in (M1 / A)
+
+- **AC:**
+  - Given kasir memilih menu dan jumlah When simpan Then order dan bill terbentuk, total dari server.
+  - Given menu HABIS When dipilih Then tidak bisa dipilih.
+
+### K-09 Batal sebelum bayar (M1 / A)
+
+- **AC:**
+  - Given order `awaiting_payment` When dibatalkan Then status batal dan reservasi (bila ada) dilepas.
+  - Given order paid When dibatalkan lewat fitur ini Then ditolak, diarahkan ke void.
+
+### K-10 Integrasi reservasi stok pada alur order (M2 / A+B)
+
+- **Dependensi:** L-03, L-05, L-06.
+- **AC:**
+  - Given order valid When dibuat Then `reserveForOrder` dipanggil dalam transaksi yang sama.
+  - Given satu item habis When order multi-item dibuat Then order ditolak seluruhnya dan tidak ada reservasi tersisa.
+  - Given bill paid When commit Then movement `sale` tertulis tepat sekali.
+  - Given TTL habis When job berjalan Then order `expired` dan reservasi dilepas.
+- **Batas file:** adapter di service order; dilarang menulis movement langsung.
+- **Review manusia:** **ya, wajib** (konkurensi stok).
+
+### K-11 Ketersediaan dan toggle HABIS di kasir (M2 / A)
+
+- **Dependensi:** L-06.
+- **AC:**
+  - Given stok tersedia 0 When kasir membuka daftar menu Then menu HABIS.
+  - Given toggle manual ditekan When sukses Then menu HABIS di kasir, customer, dan `/logistik`.
+  - Given permintaan API langsung untuk menu HABIS When dikirim Then ditolak server.
+
+### K-12 Tiket dapur dan status realtime (M2 / A+B)
+
+- **AC:**
+  - Given order dilepas When realtime tiba Then tiket tampil (di `/dapur` atau `/kasir` bila flag mati).
+  - Given koneksi putus lalu tersambung When pulih Then data disinkronkan.
+
+### K-13 Void/refund dan audit (M3 / A)
+
+- **Menunggu:** keputusan pertanyaan #3 dan #6, state machine Fase 2.
+- **AC:**
+  - Given void tanpa otorisasi When dicoba Then ditolak.
+  - Given void sah When disimpan Then status `void`, `reverseSale` dipanggil, audit tercatat.
+  - Given void dua kali When dikirim Then tidak ada pembalikan ganda.
+- **Review manusia:** **ya, wajib**.
+
+### K-14 Seed demo dan suite integrasi kasir ↔ logistik (M2 / A+B)
+
+- **AC:** seed Lampiran A dapat dimuat ke database demo; seluruh skenario S1 sampai S8 dan semua pernyataan keberhasilan di Lampiran A lolos sebagai test otomatis.
+- **Review manusia:** ya.
+
+## 14. Pemetaan ke G0
+
+| Uji | Hubungan dengan modul kasir |
+| --- | --- |
+| T1 | Perilaku kompetitor saat stok = 0 di halaman customer menentukan apakah integrasi K-10 dan K-11 tetap menjadi wedge |
+| T2 (A1, B1, B2, B3) | Frekuensi menu habis, bayar di awal atau akhir, cara memastikan uang QRIS, dan pembagian peran saat ramai menentukan prioritas K-04, K-13, dan pay_after |
+| T3 | Berlaku untuk layar stok pagi di `/logistik`, bukan layar kasir |
+
+Kode produk (K-03 dan seterusnya) baru boleh dimulai setelah G0 lolos dan kontrak beku di Fase 4. K-01 dan K-02 adalah bahan desain Fase 4.
+
+---
+
+# Lampiran A. Data dummy demo: integrasi kasir ↔ logistik
+
+> **Peringatan:** semua data di bawah rekaan untuk demo dan test. Bukan hasil wawancara, bukan bukti validasi, dan tidak dihitung untuk G0. Harga dan nama menu hanya contoh. Tidak ada kredensial akun di lampiran ini; akun demo menunggu daftar dari manusia.
+
+## A.1 Latar demo
+
+- Outlet: `outlet_demo_01` "Warung Demo" · Tanggal bisnis: `2026-11-10` · Zona waktu: WIB [HIPOTESIS].
+- Metode bayar: ManualQris dan SandboxGateway. Tunai tidak dipakai (ADR-0001 belum diputuskan).
+- Mode bayar: semua `pay_first`. TTL reservasi: 10 menit (usulan).
+- Dapur: flag nonaktif; tiket tampil di `/kasir` [HIPOTESIS].
+- Meja: M01 sampai M05, token placeholder `tok_demo_m01` dan seterusnya.
+
+## A.2 Menu dan stok awal
+
+| ID menu | Menu | Harga (Rp) | Item stok | Stok awal (porsi) |
+| --- | --- | --- | --- | --- |
+| MN-01 | Nasi Ayam Goreng | 18.000 | SI-01 | 20 |
+| MN-02 | Nasi Rawon | 20.000 | SI-02 | 15 |
+| MN-03 | Soto Ayam | 16.000 | SI-03 | 12 |
+| MN-04 | Nasi Pecel | 12.000 | SI-04 | 15 |
+| MN-05 | Telur Dadar | 6.000 | SI-05 | 10 |
+| MN-06 | Gado-gado | 14.000 | SI-06 | 8 |
+| MN-07 | Tahu Tempe Goreng | 5.000 | tidak dilacak | - |
+| MN-08 | Es Teh Manis | 4.000 | tidak dilacak | - |
+| MN-09 | Es Jeruk | 6.000 | tidak dilacak | - |
+| MN-10 | Kopi Hitam | 5.000 | tidak dilacak | - |
+
+Menu tanpa stok diperlakukan tidak dilacak (selalu tersedia kecuali toggle manual); ini asumsi [HIPOTESIS] sampai pertanyaan #5 di PRD Logistik diputuskan.
+
+## A.3 Skenario demo (kronologis)
+
+| # | Waktu | Aksi | Yang ditunjukkan |
+| --- | --- | --- | --- |
+| S1 | 07:30 | Pemilik isi stok pagi 6 menu (`setDailyStock`) | 6 movement `opening` atomik; semua menu terlacak tampil tersedia di kasir dan customer |
+| S2 | 10:05 | **ORD-001** (QR M01): Gado-gado ×3, Es Jeruk ×3 = Rp60.000. Kasir konfirmasi ManualQris 10:08 | Reservasi 3 → tersedia Gado-gado 8 → 5; bayar → commit `sale` −3, tiket tampil di `/kasir` |
+| S3 | 10:40 | **ORD-002** (walk-in kasir): Gado-gado ×4, Kopi Hitam ×1 = Rp61.000. ManualQris 10:43 | Stok Gado-gado tinggal 1 |
+| S4 | 11:15 | **ORD-003** (QR M02): Ayam Goreng ×2, Es Teh ×1 = Rp40.000. SandboxGateway 11:18, **webhook terkirim dua kali** | Satu payment, satu movement `sale` −2 (idempotensi) |
+| S5 | 11:42:10 | **ORD-004** (QR M03) dan **permintaan B** (QR M04) memesan Gado-gado ×1 hampir bersamaan (selisih 15 ms) | Hanya satu reservasi berhasil; yang lain ditolak "Menu habis"; Gado-gado HABIS di semua layar |
+| S6 | 11:52:10 | ORD-004 tidak dibayar, TTL habis | Reservasi `expired`, Gado-gado tersedia 1 lagi, HABIS hilang |
+| S7 | 11:55 | **ORD-005** (QR M04): Gado-gado ×1 = Rp14.000. ManualQris 11:57 | Commit `sale` −1; Gado-gado 0 dan HABIS sampai akhir hari |
+| S8 | 12:10 | **ORD-006** (QR M05): Soto ×1, Pecel ×1 = Rp28.000. ManualQris 12:13 | Dua movement `sale` |
+| S9 | 12:20 | Kasir toggle HABIS manual Nasi Rawon (stok tercatat 15) | Rawon HABIS di tiga layar walau stok > 0 |
+| S10 | 12:21 | Permintaan API langsung memesan Rawon | Ditolak server (FR-21) |
+| S11 | 12:30 | Opsional (M3): ORD-006 di-void (salah pesan) dengan otorisasi pemilik | Movement `reversal` +1 untuk Soto dan Pecel (**perilaku usulan**, menunggu Fase 2); audit tercatat |
+
+## A.4 Order
+
+| Order | Sumber | Meja | Item | Total (Rp) | Metode | Status akhir | Dilepas ke dapur |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| ORD-001 | QR | M01 | Gado-gado ×3; Es Jeruk ×3 | 60.000 | ManualQris | paid 10:08 | 10:08 |
+| ORD-002 | Walk-in | takeaway | Gado-gado ×4; Kopi Hitam ×1 | 61.000 | ManualQris | paid 10:43 | 10:43 |
+| ORD-003 | QR | M02 | Ayam Goreng ×2; Es Teh ×1 | 40.000 | SandboxGateway | paid 11:18 | 11:18 |
+| ORD-004 | QR | M03 | Gado-gado ×1 | 14.000 | - | expired 11:52:10 | tidak pernah |
+| ORD-005 | QR | M04 | Gado-gado ×1 | 14.000 | ManualQris | paid 11:57 | 11:57 |
+| ORD-006 | QR | M05 | Soto Ayam ×1; Nasi Pecel ×1 | 28.000 | ManualQris | paid 12:13, void 12:30 (S11) | 12:13 |
+
+Permintaan B di S5 (QR M04, 11:42:10.135) ditolak sebelum order terbentuk, jadi tidak punya nomor order. Perhitungan total: ORD-001 = 3×14.000 + 3×6.000; ORD-002 = 4×14.000 + 5.000; ORD-003 = 2×18.000 + 4.000; ORD-006 = 16.000 + 12.000.
+
+## A.5 Ledger `stock_movement` (tanggal bisnis 2026-11-10)
+
+| ID | Waktu | Item | Tipe | Qty | Order | Idempotency key |
+| --- | --- | --- | --- | --- | --- | --- |
+| MV-001 | 07:30 | SI-01 | opening | +20 | - | demo-open-si01 |
+| MV-002 | 07:30 | SI-02 | opening | +15 | - | demo-open-si02 |
+| MV-003 | 07:30 | SI-03 | opening | +12 | - | demo-open-si03 |
+| MV-004 | 07:30 | SI-04 | opening | +15 | - | demo-open-si04 |
+| MV-005 | 07:30 | SI-05 | opening | +10 | - | demo-open-si05 |
+| MV-006 | 07:30 | SI-06 | opening | +8 | - | demo-open-si06 |
+| MV-007 | 10:08 | SI-06 | sale | −3 | ORD-001 | demo-sale-ord001-si06 |
+| MV-008 | 10:43 | SI-06 | sale | −4 | ORD-002 | demo-sale-ord002-si06 |
+| MV-009 | 11:18 | SI-01 | sale | −2 | ORD-003 | demo-sale-ord003-si01 |
+| MV-010 | 11:57 | SI-06 | sale | −1 | ORD-005 | demo-sale-ord005-si06 |
+| MV-011 | 12:13 | SI-03 | sale | −1 | ORD-006 | demo-sale-ord006-si03 |
+| MV-012 | 12:13 | SI-04 | sale | −1 | ORD-006 | demo-sale-ord006-si04 |
+| MV-013 | 12:30 | SI-03 | reversal | +1 | ORD-006 | demo-rev-ord006-si03 |
+| MV-014 | 12:30 | SI-04 | reversal | +1 | ORD-006 | demo-rev-ord006-si04 |
+
+Baris tidak pernah diubah atau dihapus. MV-013 dan MV-014 hanya ada jika S11 dijalankan.
+
+## A.6 Reservasi `stock_reservation`
+
+| ID | Order | Item | Qty | Status akhir | Dibuat | Kedaluwarsa | Penutup |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| RS-001 | ORD-001 | SI-06 | 3 | committed | 10:05 | 10:15 | 10:08 |
+| RS-002 | ORD-002 | SI-06 | 4 | committed | 10:40 | 10:50 | 10:43 |
+| RS-003 | ORD-003 | SI-01 | 2 | committed | 11:15 | 11:25 | 11:18 |
+| RS-004 | ORD-004 | SI-06 | 1 | expired | 11:42:10 | 11:52:10 | TTL 11:52:10 |
+| RS-005 | ORD-005 | SI-06 | 1 | committed | 11:55 | 12:05 | 11:57 |
+| RS-006 | ORD-006 | SI-03 | 1 | committed | 12:10 | 12:20 | 12:13 |
+| RS-007 | ORD-006 | SI-04 | 1 | committed | 12:10 | 12:20 | 12:13 |
+
+## A.7 Jejak ketersediaan Gado-gado (SI-06) di tiga layar
+
+Kolom "Kasir", "Customer", dan "Logistik" harus identik pada setiap baris.
+
+| Waktu | Peristiwa | Stok awal | Terjual | Tertahan | Tersedia | Status (3 layar) |
+| --- | --- | --- | --- | --- | --- | --- |
+| 07:30 | Stok pagi diisi | 8 | 0 | 0 | 8 | AVAILABLE |
+| 10:05 | ORD-001 dibuat | 8 | 0 | 3 | 5 | AVAILABLE |
+| 10:08 | ORD-001 dibayar | 8 | 3 | 0 | 5 | AVAILABLE |
+| 10:40 | ORD-002 dibuat | 8 | 3 | 4 | 1 | AVAILABLE |
+| 10:43 | ORD-002 dibayar | 8 | 7 | 0 | 1 | AVAILABLE |
+| 11:42:10.120 | ORD-004 dibuat | 8 | 7 | 1 | 0 | HABIS |
+| 11:42:10.135 | Permintaan B ditolak | 8 | 7 | 1 | 0 | HABIS |
+| 11:52:10 | ORD-004 kedaluwarsa | 8 | 7 | 0 | 1 | AVAILABLE |
+| 11:55 | ORD-005 dibuat | 8 | 7 | 1 | 0 | HABIS |
+| 11:57 | ORD-005 dibayar | 8 | 8 | 0 | 0 | HABIS |
+
+## A.8 Rekap akhir hari (dihitung dari ledger, dengan S11 dijalankan)
+
+| Menu | Awal | Terjual | Terbuang | Koreksi/pembalikan | Sisa | Catatan |
+| --- | --- | --- | --- | --- | --- | --- |
+| Nasi Ayam Goreng | 20 | 2 | 0 | 0 | 18 | |
+| Nasi Rawon | 15 | 0 | 0 | 0 | 15 | HABIS manual dari 12:20 |
+| Soto Ayam | 12 | 1 | 0 | +1 | 12 | Pembalikan dari void ORD-006 |
+| Nasi Pecel | 15 | 1 | 0 | +1 | 15 | Pembalikan dari void ORD-006 |
+| Telur Dadar | 10 | 0 | 0 | 0 | 10 | |
+| Gado-gado | 8 | 8 | 0 | 0 | 0 | |
+
+Omzet pesanan berbayar: Rp203.000 sebelum void; **Rp175.000** setelah ORD-006 di-void (ORD-001 + 002 + 003 + 005 = 60.000 + 61.000 + 40.000 + 14.000). Tanpa S11, omzet Rp203.000 dan Soto serta Pecel masing-masing sisa 11 dan 14.
+
+## A.9 Pernyataan keberhasilan integrasi (kriteria lolos demo)
+
+Setiap butir harus bisa diperiksa otomatis (K-14) dan dicentang saat demo.
+
+- [ ] **I-1 Satu sumber kebenaran:** pada setiap baris A.7, `getAvailability` memberi hasil identik untuk kasir, halaman customer, dan `/logistik`.
+- [ ] **I-2 Tanpa oversell:** pada S5, tepat satu reservasi `active` dan satu permintaan ditolak "Menu habis"; saldo Gado-gado tidak pernah negatif.
+- [ ] **I-3 Gerbang dapur:** tidak ada tiket untuk ORD-004; tiket ORD-001, 002, 003, 005, 006 muncul tepat sekali, pada waktu bayar.
+- [ ] **I-4 Webhook ganda:** pada S4, jumlah payment ORD-003 = 1 dan jumlah movement `sale` untuk ORD-003 = 1.
+- [ ] **I-5 TTL:** setelah 11:52:10, RS-004 berstatus `expired`, ORD-004 tidak punya movement `sale`, Gado-gado kembali tersedia 1.
+- [ ] **I-6 Toggle manual:** setelah S9, Rawon HABIS di tiga layar walau saldo 15; S10 ditolak oleh server.
+- [ ] **I-7 Idempotensi commit:** memanggil `commitReservation` ulang untuk ORD-001 tidak menambah movement.
+- [ ] **I-8 Rekonsiliasi:** untuk setiap item, saldo akhir = jumlah seluruh movement, dan angka rekap A.8 = hasil penjumlahan ledger A.5.
+- [ ] **I-9 Total konsisten:** total tiap order di A.4 sama di kasir, customer, dan bukti pesanan; total tidak berasal dari klien.
+- [ ] **I-10 Audit log:** konfirmasi bayar (5 kali), toggle manual (1 kali), dan void (jika S11) masing-masing punya entri dengan pelaku dan waktu.
+- [ ] **I-11 Void (opsional, M3):** MV-013 dan MV-014 tercatat sebagai baris baru, baris `sale` asli utuh, void kedua kali tidak membuat pembalikan ganda. Perilaku ini mengikuti usulan, bukan keputusan.
+
+## A.10 Seed JSON (ringkas)
+
+```json
+{
+  "outlet": { "id": "outlet_demo_01", "name": "Warung Demo", "businessDate": "2026-11-10", "tz": "Asia/Jakarta", "kitchenFlag": false, "reservationTtlMinutes": 10 },
+  "tables": ["M01", "M02", "M03", "M04", "M05"],
+  "menu": [
+    { "id": "MN-01", "name": "Nasi Ayam Goreng", "price": 18000, "stockItem": "SI-01", "opening": 20 },
+    { "id": "MN-02", "name": "Nasi Rawon", "price": 20000, "stockItem": "SI-02", "opening": 15 },
+    { "id": "MN-03", "name": "Soto Ayam", "price": 16000, "stockItem": "SI-03", "opening": 12 },
+    { "id": "MN-04", "name": "Nasi Pecel", "price": 12000, "stockItem": "SI-04", "opening": 15 },
+    { "id": "MN-05", "name": "Telur Dadar", "price": 6000, "stockItem": "SI-05", "opening": 10 },
+    { "id": "MN-06", "name": "Gado-gado", "price": 14000, "stockItem": "SI-06", "opening": 8 },
+    { "id": "MN-07", "name": "Tahu Tempe Goreng", "price": 5000, "stockItem": null },
+    { "id": "MN-08", "name": "Es Teh Manis", "price": 4000, "stockItem": null },
+    { "id": "MN-09", "name": "Es Jeruk", "price": 6000, "stockItem": null },
+    { "id": "MN-10", "name": "Kopi Hitam", "price": 5000, "stockItem": null }
+  ],
+  "orders": [
+    { "id": "ORD-001", "source": "customer_qr", "table": "M01", "items": [["MN-06", 3], ["MN-09", 3]], "total": 60000, "provider": "manual_qris", "createdAt": "10:05", "paidAt": "10:08" },
+    { "id": "ORD-002", "source": "walk_in", "table": null, "items": [["MN-06", 4], ["MN-10", 1]], "total": 61000, "provider": "manual_qris", "createdAt": "10:40", "paidAt": "10:43" },
+    { "id": "ORD-003", "source": "customer_qr", "table": "M02", "items": [["MN-01", 2], ["MN-08", 1]], "total": 40000, "provider": "sandbox", "createdAt": "11:15", "paidAt": "11:18", "webhookDeliveries": 2 },
+    { "id": "ORD-004", "source": "customer_qr", "table": "M03", "items": [["MN-06", 1]], "total": 14000, "provider": null, "createdAt": "11:42:10.120", "expiredAt": "11:52:10" },
+    { "id": "ORD-005", "source": "customer_qr", "table": "M04", "items": [["MN-06", 1]], "total": 14000, "provider": "manual_qris", "createdAt": "11:55", "paidAt": "11:57" },
+    { "id": "ORD-006", "source": "customer_qr", "table": "M05", "items": [["MN-03", 1], ["MN-04", 1]], "total": 28000, "provider": "manual_qris", "createdAt": "12:10", "paidAt": "12:13", "voidAt": "12:30", "voidOptional": true }
+  ],
+  "rejectedRequests": [
+    { "at": "11:42:10.135", "table": "M04", "items": [["MN-06", 1]], "reason": "Menu habis" },
+    { "at": "12:21", "channel": "api_direct", "items": [["MN-02", 1]], "reason": "Menu habis (manual)" }
+  ],
+  "manualSoldOut": [{ "menu": "MN-02", "at": "12:20", "by": "kasir_demo" }],
+  "expected": {
+    "balances": { "SI-01": 18, "SI-02": 15, "SI-03": 12, "SI-04": 15, "SI-05": 10, "SI-06": 0 },
+    "revenuePaidNotVoid": 175000
+  }
+}
+```
+
+Saldo `expected` mengasumsikan S11 dijalankan. Tanpa S11: SI-03 = 11 dan SI-04 = 14, omzet 203.000.
+
+## A.11 Cara memakai di demo
+
+1. Muat seed (K-14) ke database demo, lalu jalankan S1 sampai S11 berurutan (atau lewat skrip dengan jam disimulasikan).
+2. Buka tiga layar berdampingan: `/kasir`, halaman customer meja, dan `/logistik`. Perhatikan angka tersedia di baris A.7.
+3. Centang I-1 sampai I-11. Satu butir gagal berarti integrasi belum lolos.
+4. Hasil demo ini membuktikan **kebenaran desain dan kode**, bukan bahwa pemilik warung mau mengisi stok tiap pagi. Itu hanya bisa dijawab T2 dan T3.
+
+---
+
+*Dokumen ini draf kerja. Tidak ada keputusan arsitektur atau scope yang diambil di sini; semua menunggu persetujuan manusia.*

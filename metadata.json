@@ -1,0 +1,6 @@
+{
+  "name": "F&B POS & Logistik Multi-Modul",
+  "description": "MVP Kasir (/kasir), Logistik (/logistik), dan Customer QR terintegrasi dengan ledger stok anti-oversell dan verifikasi pembayaran.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
