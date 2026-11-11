@@ -14,7 +14,7 @@ export const LogistikView: React.FC = () => {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-200">
         <div>
           <h1 className="text-xl font-bold text-slate-900 tracking-tight">
-            Modul Logistik & Inventori Porsi (/logistik)
+            Modul Logistik & Inventori Porsi
           </h1>
           <p className="text-xs text-slate-500 mt-0.5">
             Pengisian stok pagi, pantauan sisa porsi, koreksi/terbuang, dan rekapitulasi ledger append-only.

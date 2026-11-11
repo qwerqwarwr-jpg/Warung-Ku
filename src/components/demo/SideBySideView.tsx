@@ -245,7 +245,7 @@ export const SideBySideView: React.FC = () => {
             <div className="bg-slate-900 text-white px-4 py-3 flex items-center justify-between shrink-0">
               <div className="flex items-center gap-2">
                 <Store className="w-4 h-4 text-amber-400" />
-                <span className="text-xs font-bold uppercase tracking-wider">Layar 1: Kasir (/kasir)</span>
+                <span className="text-xs font-bold uppercase tracking-wider">Layar 1: Kasir</span>
               </div>
               <span className="text-[11px] font-mono text-slate-400">Walk-in & Bayar</span>
             </div>
@@ -261,7 +261,7 @@ export const SideBySideView: React.FC = () => {
             <div className="bg-slate-900 text-white px-4 py-3 flex items-center justify-between shrink-0">
               <div className="flex items-center gap-2">
                 <Smartphone className="w-4 h-4 text-emerald-400" />
-                <span className="text-xs font-bold uppercase tracking-wider">Layar 2: Customer QR (/customer)</span>
+                <span className="text-xs font-bold uppercase tracking-wider">Layar 2: Customer QR</span>
               </div>
               <span className="text-[11px] font-mono text-slate-400">Pesan Meja Mandiri</span>
             </div>
@@ -277,7 +277,7 @@ export const SideBySideView: React.FC = () => {
             <div className="bg-slate-900 text-white px-4 py-3 flex items-center justify-between shrink-0">
               <div className="flex items-center gap-2">
                 <Boxes className="w-4 h-4 text-indigo-400" />
-                <span className="text-xs font-bold uppercase tracking-wider">Layar 3: Logistik (/logistik)</span>
+                <span className="text-xs font-bold uppercase tracking-wider">Layar 3: Logistik</span>
               </div>
               <span className="text-[11px] font-mono text-slate-400">Stok Pagi & Pantau</span>
             </div>

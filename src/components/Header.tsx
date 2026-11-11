@@ -47,6 +47,7 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, setActiveTab }) => {
   } = useApp();
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   const awaitingCount = orders.filter((o) => o.status === 'awaiting_payment').length;
 
@@ -118,6 +119,14 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, setActiveTab }) => {
           <div className="bg-amber-500 text-slate-950 px-3 py-1.5 text-xs font-semibold text-center flex items-center justify-center gap-2 animate-pulse">
             <WifiOff className="w-3.5 h-3.5 shrink-0" />
             <span className="truncate">Menyambung ulang koneksi... Data akan sinkron saat pulih.</span>
+          </div>
+        )}
+
+        {/* Feedback Toast */}
+        {toastMessage && (
+          <div className="bg-emerald-600 text-white px-3 py-2 text-xs font-semibold text-center flex items-center justify-center gap-2 shadow-xs transition-all">
+            <Sparkles className="w-4 h-4 text-amber-300 shrink-0" />
+            <span>{toastMessage}</span>
           </div>
         )}
 
@@ -206,22 +215,15 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, setActiveTab }) => {
                 {isReconnecting ? <WifiOff className="w-4 h-4" /> : <Wifi className="w-4 h-4 text-emerald-600" />}
               </button>
 
-              {/* Load Full Demo Data (Desktop button) */}
-              <button
-                type="button"
-                onClick={loadFullLampiranAData}
-                className="hidden xl:flex items-center gap-1.5 px-3 py-2 rounded-md border border-slate-300 text-xs font-semibold text-slate-700 hover:bg-slate-100 transition-colors whitespace-nowrap min-h-[44px]"
-                title="Muat data lengkap skenario Lampiran A (S1 s/d S11)"
-              >
-                <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
-                <span>Muat Data Demo</span>
-              </button>
-
               {/* Reset to 07:30 Button */}
               <button
                 type="button"
-                onClick={resetToInitialState}
-                className="p-2 rounded-md border border-slate-200 text-slate-500 hover:text-rose-600 hover:bg-rose-50 transition-colors min-h-[44px] min-w-[44px] flex items-center justify-center"
+                onClick={() => {
+                  resetToInitialState();
+                  setToastMessage('Kondisi direset ke 07:30 (kosong sebelum pengisian stok).');
+                  setTimeout(() => setToastMessage(null), 3500);
+                }}
+                className="p-2 rounded-md border border-slate-200 text-slate-500 hover:text-rose-600 hover:bg-rose-50 transition-colors min-h-[44px] min-w-[44px] flex items-center justify-center cursor-pointer"
                 title="Reset ke kondisi awal 07:30 (kosong)"
                 aria-label="Reset kondisi awal"
               >
@@ -346,16 +348,19 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, setActiveTab }) => {
 
             {/* Drawer Footer Actions */}
             <div className="p-4 border-t border-slate-200 bg-slate-50 space-y-2 shrink-0">
+
               <button
                 type="button"
                 onClick={() => {
                   loadFullLampiranAData();
                   setMobileMenuOpen(false);
+                  setToastMessage('Seluruh skenario S1–S11 selesai dimuat.');
+                  setTimeout(() => setToastMessage(null), 3500);
                 }}
-                className="w-full flex items-center justify-center gap-2 py-2.5 px-4 bg-emerald-600 text-white rounded-lg text-xs font-bold hover:bg-emerald-700 min-h-[44px] transition-colors"
+                className="w-full flex items-center justify-center gap-2 py-2 px-4 border border-slate-300 bg-white text-slate-700 rounded-lg text-xs font-semibold hover:bg-slate-100 min-h-[44px] transition-colors"
               >
-                <Sparkles className="w-4 h-4" />
-                <span>Muat Data Demo Penuh (S1–S11)</span>
+                <Sparkles className="w-4 h-4 text-indigo-600" />
+                <span>Muat Data Skenario S1–S11</span>
               </button>
 
               <button
@@ -363,10 +368,12 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, setActiveTab }) => {
                 onClick={() => {
                   resetToInitialState();
                   setMobileMenuOpen(false);
+                  setToastMessage('Kondisi direset ke 07:30 (kosong).');
+                  setTimeout(() => setToastMessage(null), 3500);
                 }}
-                className="w-full flex items-center justify-center gap-2 py-2 px-4 border border-slate-300 bg-white text-slate-700 rounded-lg text-xs font-semibold hover:bg-slate-100 min-h-[44px] transition-colors"
+                className="w-full flex items-center justify-center gap-2 py-2 px-4 border border-rose-200 bg-rose-50/50 text-rose-700 rounded-lg text-xs font-semibold hover:bg-rose-100 min-h-[44px] transition-colors"
               >
-                <RotateCcw className="w-4 h-4 text-slate-500" />
+                <RotateCcw className="w-4 h-4 text-rose-500" />
                 <span>Reset ke 07:30 (Kosong)</span>
               </button>
             </div>

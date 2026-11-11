@@ -18,6 +18,7 @@ import {
   INITIAL_TABLES,
   MORNING_OPENING_STOCK,
   OUTLET_CONFIG,
+  getSeedInitialState,
 } from '../data/seedData';
 import { StockService } from '../services/stockService';
 import { BillService } from '../services/billService';
@@ -99,6 +100,7 @@ export interface AppContextType {
   runAllScenarios: () => void;
   resetToInitialState: () => void;
   loadFullLampiranAData: () => void;
+  loadSeedData: () => void;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -109,18 +111,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [tables] = useState<string[]>(INITIAL_TABLES);
   const [businessDate] = useState<string>(OUTLET_CONFIG.businessDate);
 
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [bills, setBills] = useState<Bill[]>([]);
-  const [payments, setPayments] = useState<Payment[]>([]);
-  const [stockMovements, setStockMovements] = useState<StockMovement[]>([]);
-  const [stockReservations, setStockReservations] = useState<StockReservation[]>([]);
+  // Initialize with rich seed data out of the box
+  const initialSeed = getSeedInitialState();
+  const [orders, setOrders] = useState<Order[]>(initialSeed.orders);
+  const [bills, setBills] = useState<Bill[]>(initialSeed.bills);
+  const [payments, setPayments] = useState<Payment[]>(initialSeed.payments);
+  const [stockMovements, setStockMovements] = useState<StockMovement[]>(initialSeed.stockMovements);
+  const [stockReservations, setStockReservations] = useState<StockReservation[]>(initialSeed.stockReservations);
   const [manualOverrides, setManualOverrides] = useState<MenuAvailabilityOverride[]>([]);
-  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>(initialSeed.auditLogs);
 
-  const [currentTime, setCurrentTime] = useState<string>('07:30');
+  const [currentTime, setCurrentTime] = useState<string>(initialSeed.currentTime);
   const [kitchenFlag, setKitchenFlag] = useState<boolean>(OUTLET_CONFIG.kitchenFlag);
   const [isReconnecting, setIsReconnecting] = useState<boolean>(false);
-  const [activeScenarioStep, setActiveScenarioStep] = useState<number>(0);
+  const [activeScenarioStep, setActiveScenarioStep] = useState<number>(4);
   const [customerTable, setCustomerTable] = useState<string>('M01');
 
   // Automatic TTL expiration checker against simulated currentTime
@@ -1074,6 +1078,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     runAllScenarios();
   };
 
+  // Dedicated Seed Data loader function
+  const loadSeedData = () => {
+    const seed = getSeedInitialState();
+    setOrders(seed.orders);
+    setBills(seed.bills);
+    setPayments(seed.payments);
+    setStockMovements(seed.stockMovements);
+    setStockReservations(seed.stockReservations);
+    setManualOverrides([]);
+    setAuditLogs(seed.auditLogs);
+    setCurrentTime(seed.currentTime);
+    setActiveScenarioStep(4);
+  };
+
   return (
     <AppContext.Provider
       value={{
@@ -1112,6 +1130,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         runAllScenarios,
         resetToInitialState,
         loadFullLampiranAData,
+        loadSeedData,
       }}
     >
       {children}
